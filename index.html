@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta http-equiv="Content-Language" content="ru">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Backup Team — открытые проекты для Windows. RecoverX и другие инструменты под лицензией GPL v3.">
+    <meta name="description" content="Backup Team — открытые проекты для Windows. BackupStore, RecoverX и другие инструменты под лицензией GPL v3.">
     <meta name="theme-color" content="#ffffff">
     <title>Backup Team — открытые проекты</title>
 
@@ -154,6 +154,12 @@
             font-weight: 700;
         }
 
+        .project-status.active {
+            border-left-color: #15803d;
+            background-color: #f0fdf4;
+            color: #166534;
+        }
+
         .project-links {
             position: relative;
             z-index: 2;
@@ -244,6 +250,25 @@
         <section class="projects-section">
             <h2>Наши проекты</h2>
             <div class="projects-grid">
+
+                <!-- Проект: BackupStore -->
+                <article class="project-card">
+                    <a href="https://github.com/matvey14ustinov13-ctrl/BackupStore" target="_blank" rel="noopener" class="card-link" aria-label="Открыть BackupStore на GitHub"></a>
+                    <div>
+                        <div class="project-header">
+                            <h3>BackupStore</h3>
+                            <span class="project-version">v1.0.0</span>
+                        </div>
+                        <p>Магазин приложений Backup Team для Windows на C++ (Win32). Каталог и релизы берутся из GitHub, программы скачиваются, распаковываются и обновляются прямо из приложения.</p>
+                        <div class="project-status active">
+                            <strong>Активный проект.</strong><br>
+                            Каталог приложений и обновления через GitHub.
+                        </div>
+                    </div>
+                    <div class="project-links">
+                        <a href="https://github.com/matvey14ustinov13-ctrl/BackupStore/blob/main/LICENSE" target="_blank" rel="noopener" class="project-link secondary">GPL v3</a>
+                    </div>
+                </article>
 
                 <!-- Проект: RecoverX -->
                 <article class="project-card">
