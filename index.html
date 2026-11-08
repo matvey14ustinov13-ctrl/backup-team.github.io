@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Backup Team — открытые проекты для Windows. RecoverX и другие инструменты под лицензией GNU GPL v3.">
+    <meta name="description" content="Backup Team — открытые проекты для Windows. RecoverX и другие инструменты под лицензией GPL v3.">
     <meta name="theme-color" content="#ffffff">
     <title>Backup Team — открытые проекты</title>
 
@@ -25,8 +25,6 @@
             outline: 2px solid #0066cc;
             outline-offset: 3px;
         }
-
-        /* Аккуратная шапка */
         header {
             background-color: #f8f9fa;
             border-bottom: 1px solid #e5e7eb;
@@ -36,14 +34,8 @@
 
         header h1 {
             font-size: 2.5rem;
-            margin: 0 0 10px 0;
-            color: #000000;
-        }
-
-        header p {
-            color: #666666;
-            font-size: 1.1rem;
             margin: 0;
+            color: #000000;
         }
 
         /* Основной контейнер */
@@ -81,10 +73,6 @@
             font-weight: bold;
         }
 
-        .gnu-link:hover {
-            text-decoration: underline;
-        }
-
         /* Сетка для карточек */
         .projects-grid {
             display: grid;
@@ -108,6 +96,13 @@
         .project-card:hover {
             border-color: #111111;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        .card-link {
+            position: absolute;
+            inset: 0;
+            border-radius: 8px;
+            z-index: 1;
         }
 
         .project-header {
@@ -159,6 +154,8 @@
         }
 
         .project-links {
+            position: relative;
+            z-index: 2;
             display: flex;
             flex-wrap: wrap;
             align-items: center;
@@ -174,11 +171,6 @@
         .project-link.secondary {
             color: #444444;
             font-weight: 600;
-        }
-
-        .project-link:hover,
-        .project-card:hover .project-link {
-            text-decoration: underline;
         }
 
         /* Подвал */
@@ -232,24 +224,19 @@
             color: #0066cc;
             text-decoration: none;
         }
-
-        .footer-note a:hover {
-            text-decoration: underline;
-        }
     </style>
 </head>
 <body>
 
     <header>
         <h1>Backup Team</h1>
-        <p>Надежные решения</p>
     </header>
 
     <main>
         <!-- Раздел: О нас -->
         <section class="about-section">
             <h2>О нас</h2>
-            <p>Мы команда Backup Team. Наши программы распространяются под лицензией <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener" class="gnu-link">GNU GPL v3</a>.</p>
+            <p>Мы команда Backup Team. Наши программы распространяются под лицензией <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener" class="gnu-link">GPL v3</a>.</p>
         </section>
 
         <!-- Раздел: Наши проекты -->
@@ -259,6 +246,7 @@
 
                 <!-- Проект: RecoverX -->
                 <article class="project-card">
+                    <a href="https://github.com/matvey14ustinov13-ctrl/RecoverX" target="_blank" rel="noopener" class="card-link" aria-label="Открыть RecoverX на GitHub"></a>
                     <div>
                         <div class="project-header">
                             <h3>RecoverX</h3>
@@ -271,21 +259,18 @@
                         </div>
                     </div>
                     <div class="project-links">
-                        <a href="https://github.com/matvey14ustinov13-ctrl/RecoverX" target="_blank" rel="noopener" class="project-link">Исходный код</a>
                         <a href="https://github.com/matvey14ustinov13-ctrl/RecoverX/blob/main/LICENSE" target="_blank" rel="noopener" class="project-link secondary">GPL v3</a>
                     </div>
                 </article>
 
                 <!-- Проект: crap -->
                 <article class="project-card">
+                    <a href="https://github.com/matvey14ustinov13-ctrl/crap" target="_blank" rel="noopener" class="card-link" aria-label="Открыть crap на GitHub"></a>
                     <div>
                         <div class="project-header">
                             <h3>crap</h3>
                         </div>
                         <p>Один из открытых репозиториев команды Backup Team. Исходный код и подробная документация доступны для изучения и совместной разработки на GitHub.</p>
-                    </div>
-                    <div class="project-links">
-                        <a href="https://github.com/matvey14ustinov13-ctrl/crap" target="_blank" rel="noopener" class="project-link">Смотреть проект</a>
                     </div>
                 </article>
 
@@ -301,7 +286,7 @@
                 </svg>
                 <span>GitHub</span>
             </a>
-            <p class="footer-note">© 2026 Backup Team · <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">GNU GPL v3</a></p>
+            <p class="footer-note">© 2026 Backup Team · <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">GPL v3</a></p>
         </div>
     </footer>
 
