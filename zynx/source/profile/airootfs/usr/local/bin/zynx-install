@@ -1,0 +1,827 @@
+#!/usr/bin/env bash
+# ============================================================================
+# zynx-install - install Zynx Linux from the live medium to a disk or USB.
+#
+# This is an offline, image-copy installer: it partitions the target, copies
+# the running live system with rsync, then configures the target in a chroot.
+# It does not use the network and does not need a package repository.
+#
+# Usage:
+#   sudo zynx-install --gui
+#   sudo zynx-install --cli
+#   sudo zynx-install --auto --disk /dev/sda --user zynx \
+#        --user-password secret --root-password '' --hostname zynx \
+#        --timezone UTC --locale en_US.UTF-8 --keyboard us \
+#        --edition full --shell bash --root-size 40 --swap 4 --yes
+#
+# The graphical front-end is zynx-gui (C + GTK3, runs as the live user and
+# asks this script to install through sudo).  --gui is kept as a zenity
+# fallback and delegates to zynx-gui when it is available.
+# ============================================================================
+set -Eeuo pipefail
+export LC_ALL=C
+umask 022
+
+LOG=/var/log/zynx-install.log
+STATUS=/run/zynx-install.status
+MOUNT=/mnt
+POSTINSTALL=/usr/local/share/zynx/zynx-postinstall.sh
+MIN_DISK_GIB=12
+
+MODE=""
+DISK=""
+USERNAME=""
+USER_PASSWORD=""
+ROOT_PASSWORD=""
+HOSTNAME="zynx"
+TIMEZONE="UTC"
+LOCALE="en_US.UTF-8"
+KEYBOARD="us"
+ASSUME_YES=0
+FORCE=0
+KEEP_MOUNT=0
+FORMAT=0          # 0 = keep the disk layout (default), 1 = wipe and repartition
+FORMAT_SET=0      # 1 when --format/--no-format was given explicitly
+EDITION="full"    # full | minimal | console
+SHELL_BIN="bash"  # bash | zsh | fish
+ROOT_GIB=40
+SWAP_GIB=4
+DEFAULT_BOOT=1    # 1 = make Zynx the default boot entry
+ROOT_PART=""
+ESP_PART=""
+HOME_PART=""
+
+log()  { printf '[zynx-install] %s\n' "$*"; }
+warn() { printf '[zynx-install] WARNING: %s\n' "$*" >&2; }
+die()  { printf '[zynx-install] ERROR: %s\n' "$*" >&2; exit 1; }
+
+# Machine-readable progress for zynx-gui: line 1 is a percentage, line 2 a
+# short human readable status.  The file is world readable on purpose.
+progress() {
+    local pct=$1; shift
+    printf '%s\n%s\n' "$pct" "$*" >"$STATUS" 2>/dev/null || true
+    log "$*"
+}
+
+usage() {
+    cat <<'EOF'
+Zynx Linux installer
+
+  zynx-install --gui                 graphical installer (GTK or zenity)
+  zynx-install --cli                 text installer
+  zynx-install --auto ... --yes      unattended install
+
+Options:
+  --disk DEVICE          target whole disk, for example /dev/sda
+  --format               erase the disk and create new partitions
+  --no-format            keep the disk layout and install onto an existing
+                         Linux root partition (no mkfs, /home is preserved)
+                         This is the default; formatting must be explicit.
+  --edition NAME         full (default), minimal or console
+  --shell NAME           login shell for the new user: bash (default), zsh, fish
+  --root-size GIB        size of the root partition (default: 40, minimum: 12)
+  --swap GIB             swap file size: 0, 2, 4 (default), 8
+  --no-default-boot      do not make Zynx the default boot entry
+  --user NAME            ordinary user name
+  --user-password PASS   ordinary user password
+  --root-password PASS   optional root password (blank locks root)
+  --hostname NAME        hostname (default: zynx)
+  --timezone TZ          IANA timezone (default: UTC)
+  --locale LOCALE        UTF-8 locale (default: en_US.UTF-8)
+  --keyboard LAYOUT      X11 layout(s) (default: us)
+  --yes                  do not ask for the ERASE confirmation
+  --force                allow the live disk or mounted disks (dangerous)
+  --keep-mounted         leave the target mounted for debugging
+EOF
+}
+
+while (($#)); do
+    case "$1" in
+        --gui)   MODE=gui ;;
+        --cli)   MODE=cli ;;
+        --auto)  MODE=auto ;;
+        --format) FORMAT=1; FORMAT_SET=1 ;;
+        --no-format) FORMAT=0; FORMAT_SET=1 ;;
+        --edition) EDITION=${2:?--edition needs a value}; shift ;;
+        --shell) SHELL_BIN=${2:?--shell needs a value}; shift ;;
+        --root-size) ROOT_GIB=${2:?--root-size needs a value}; shift ;;
+        --swap) SWAP_GIB=${2:?--swap needs a value}; shift ;;
+        --no-default-boot) DEFAULT_BOOT=0 ;;
+        --disk)  DISK=${2:?--disk needs a value}; shift ;;
+        --user)  USERNAME=${2:?--user needs a value}; shift ;;
+        --user-password) USER_PASSWORD=${2:?--user-password needs a value}; shift ;;
+        --root-password) ROOT_PASSWORD=${2-}; shift ;;
+        --hostname) HOSTNAME=${2:?--hostname needs a value}; shift ;;
+        --timezone) TIMEZONE=${2:?--timezone needs a value}; shift ;;
+        --locale) LOCALE=${2:?--locale needs a value}; shift ;;
+        --keyboard) KEYBOARD=${2:?--keyboard needs a value}; shift ;;
+        --yes|-y) ASSUME_YES=1 ;;
+        --force) FORCE=1 ;;
+        --keep-mounted) KEEP_MOUNT=1 ;;
+        --help|-h) usage; exit 0 ;;
+        *) die "Unknown option: $1 (use --help)" ;;
+    esac
+    shift
+done
+
+if [[ -z "$MODE" ]]; then
+    if [[ -n "${DISPLAY:-}" ]]; then
+        if [[ ${EUID:-$(id -u)} -ne 0 ]] && command -v zynx-gui >/dev/null 2>&1; then
+            MODE=gui
+        elif command -v zenity >/dev/null 2>&1; then
+            MODE=gui
+        else
+            MODE=cli
+        fi
+    else
+        MODE=cli
+    fi
+fi
+
+# Hand a graphical request to the GTK front-end when it runs as an ordinary
+# user.  As root (inside sudo) keep the zenity/CLI engines.
+if [[ "$MODE" == gui && ${EUID:-$(id -u)} -ne 0 ]] && \
+   command -v zynx-gui >/dev/null 2>&1; then
+    exec zynx-gui
+fi
+
+[[ ${EUID:-$(id -u)} -eq 0 ]] || die "Run this installer as root (sudo zynx-install ...)."
+
+mkdir -p /var/log
+: >>"$LOG"
+rm -f "$STATUS"
+exec > >(tee -a "$LOG") 2>&1
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+gui_info()  { zenity --info  --title="Zynx Linux Installer" --text="$1" --width=600; }
+gui_error() { zenity --error --title="Zynx Linux Installer" --text="$1" --width=600; }
+
+detect_live_disk() {
+    local target src parent
+    for target in /run/archiso/bootmnt /run/archiso/copytoram /run/archiso/cowspace; do
+        src=$(findmnt -n -o SOURCE --target "$target" 2>/dev/null || true)
+        [[ -n "$src" ]] || continue
+        parent=$(lsblk -ndo PKNAME "$src" 2>/dev/null | head -n1 || true)
+        if [[ -n "$parent" ]]; then
+            printf '/dev/%s\n' "$parent"
+            return 0
+        fi
+        if [[ "$src" == /dev/* ]]; then
+            printf '%s\n' "$src"
+            return 0
+        fi
+    done
+    return 0
+}
+
+human_size() {
+    awk -v n="${1:-0}" 'BEGIN {
+        split("B KiB MiB GiB TiB", unit, " ")
+        i = 1
+        while (n >= 1024 && i < 5) { n /= 1024; i++ }
+        if (i == 1) printf "%d B", n
+        else printf "%.1f %s", n, unit[i]
+    }'
+}
+
+# NAME<TAB>SIZE<TAB>MODEL<TAB>TRAN for every whole disk.  Pure lsblk output
+# parsing: the installer must not depend on Python.
+list_disks_tsv() {
+    local line name size model tran type
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        line=" $line"
+        type=$(sed -n 's/.*[[:space:]]TYPE="\([^"]*\)".*/\1/p' <<<"$line")
+        [[ "$type" == "disk" ]] || continue
+        name=$(sed -n 's/.*[[:space:]]NAME="\([^"]*\)".*/\1/p' <<<"$line")
+        size=$(sed -n 's/.*[[:space:]]SIZE="\([^"]*\)".*/\1/p' <<<"$line")
+        model=$(sed -n 's/.*[[:space:]]MODEL="\([^"]*\)".*/\1/p' <<<"$line")
+        tran=$(sed -n 's/.*[[:space:]]TRAN="\([^"]*\)".*/\1/p' <<<"$line")
+        [[ -n "$name" ]] || continue
+        [[ "${size:-0}" =~ ^[0-9]+$ ]] || size=0
+        (( size > 0 )) || continue
+        printf '/dev/%s\t%s\t%s\t%s\n' \
+            "$name" "$(human_size "$size")" "$model" "$tran"
+    done < <(lsblk -P -b -d -o NAME,SIZE,MODEL,TRAN,TYPE 2>/dev/null || true)
+}
+
+# Largest existing Linux filesystem on a disk, used by --no-format.
+find_root_partition() {
+    lsblk -nrbp -o PATH,FSTYPE,SIZE "$1" 2>/dev/null | awk '
+        $2 ~ /^(ext4|ext3|btrfs|xfs|f2fs)$/ {
+            if ($3 + 0 > max) { max = $3 + 0; best = $1 }
+        }
+        END { if (best != "") print best }
+    '
+}
+
+# First EFI system partition (vfat) on a disk, used by --no-format.
+find_esp_partition() {
+    lsblk -nrbp -o PATH,FSTYPE "$1" 2>/dev/null | awk '
+        $2 == "vfat" { print $1; exit }
+    '
+}
+
+validate_details() {
+    if [[ ! "$USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+        printf 'Invalid username.\n'
+        return 1
+    fi
+    if [[ "$USERNAME" == "root" ]]; then
+        printf "The user name 'root' is reserved.\n"
+        return 1
+    fi
+    if [[ "$USERNAME" != "zynx" ]] && getent passwd "$USERNAME" >/dev/null 2>&1; then
+        printf 'That user already exists on the live system; choose another name.\n'
+        return 1
+    fi
+    if [[ -z "$USER_PASSWORD" ]]; then
+        printf 'The user password cannot be empty.\n'
+        return 1
+    fi
+    if [[ ! "$HOSTNAME" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
+        printf 'Invalid hostname.\n'
+        return 1
+    fi
+    if [[ -n "$ROOT_PASSWORD" && ${#ROOT_PASSWORD} -lt 4 ]]; then
+        printf 'The root password is too short; leave it blank to lock root.\n'
+        return 1
+    fi
+    return 0
+}
+
+validate_options() {
+    case "$EDITION" in
+        full|minimal|console) ;;
+        *) die "Unknown edition: $EDITION (use full, minimal or console)." ;;
+    esac
+    case "$SHELL_BIN" in
+        bash|zsh|fish) ;;
+        *) die "Unknown login shell: $SHELL_BIN (use bash, zsh or fish)." ;;
+    esac
+    [[ "$ROOT_GIB" =~ ^[0-9]+$ ]] || die "Invalid --root-size: $ROOT_GIB"
+    (( ROOT_GIB >= 12 )) || die "The root partition must be at least 12 GiB."
+    [[ "$SWAP_GIB" =~ ^[0-9]+$ ]] || die "Invalid --swap size: $SWAP_GIB"
+    (( SWAP_GIB <= 64 )) || die "The swap file cannot be larger than 64 GiB."
+}
+
+validate_disk() {
+    validate_options
+    [[ -b "$DISK" ]] || die "Not a block device: $DISK"
+    [[ "$(lsblk -dno TYPE "$DISK" 2>/dev/null)" == "disk" ]] || die "$DISK is not a whole disk."
+    local live mp size gib
+    live=$(detect_live_disk)
+    if [[ -n "$live" && "$DISK" == "$live" && $FORCE -ne 1 ]]; then
+        die "Refusing to install onto the live medium ($DISK). Use --force only if you really mean it."
+    fi
+    mp=$(lsblk -nlo MOUNTPOINT "$DISK" 2>/dev/null | grep -v '^$' || true)
+    if [[ -n "$mp" && $FORCE -ne 1 ]]; then
+        die "Disk $DISK has mounted partitions: $mp. Unmount them or use --force."
+    fi
+    if (( FORMAT == 0 )); then
+        ROOT_PART=$(find_root_partition "$DISK")
+        [[ -n "$ROOT_PART" ]] || die "No existing Linux root filesystem (ext4/btrfs/xfs/f2fs) found on $DISK. Enable formatting to create one."
+    fi
+    size=$(blockdev --getsize64 "$DISK" 2>/dev/null || echo 0)
+    if (( size < MIN_DISK_GIB * 1024 * 1024 * 1024 )); then
+        die "Disk $DISK is smaller than ${MIN_DISK_GIB} GiB; the full desktop system will not fit."
+    elif (( size < 16 * 1024 * 1024 * 1024 )); then
+        warn "Disk $DISK is smaller than 16 GiB; the install may be tight."
+    fi
+    if (( FORMAT == 1 )); then
+        gib=$(( size / 1024 / 1024 / 1024 ))
+        if (( gib < ROOT_GIB + 6 )); then
+            die "A ${ROOT_GIB} GiB root partition does not fit on ${gib} GiB: /home needs at least 5 GiB and the ESP 512 MiB."
+        fi
+    fi
+}
+
+ask_gui_disk() {
+    local rows=() first=TRUE name size model tran label live selected
+    live=$(detect_live_disk)
+    while IFS=$'\t' read -r name size model tran; do
+        [[ -n "$name" ]] || continue
+        if [[ -n "$live" && "$name" == "$live" && $FORCE -ne 1 ]]; then
+            continue
+        fi
+        label="$model"
+        [[ -n "$tran" ]] && label="$label ($tran)"
+        rows+=("$first" "$name" "$size" "$label")
+        first=FALSE
+    done < <(list_disks_tsv)
+
+    ((${#rows[@]})) || die "No usable disks found."
+
+    if ! selected=$(zenity --list --radiolist \
+        --title="Zynx Linux Installer" \
+        --text="<b>Select the target disk.</b>\n\nALL DATA ON THE SELECTED DISK WILL BE ERASED." \
+        --column="Select" --column="Device" --column="Size" --column="Model" \
+        --print-column=2 --width=850 --height=430 "${rows[@]}"); then
+        exit 1
+    fi
+    DISK="$selected"
+
+    if (( FORMAT_SET == 0 )); then
+        if zenity --question --title="Disk formatting" --width=620 \
+            --text="<b>Format the disk?</b>\n\nYes: erase all partitions and create a fresh Zynx layout (root + /home).\nNo: keep the current layout and install onto the largest existing Linux partition (no mkfs, /home is preserved)." \
+            --ok-label="Keep data" --cancel-label="Format disk"; then
+            FORMAT=0
+        else
+            FORMAT=1
+        fi
+    fi
+}
+
+ask_cli_disk() {
+    local live name size model tran i=1 choice action
+    local -a paths=()
+    live=$(detect_live_disk)
+    printf '\nAvailable disks:\n'
+    while IFS=$'\t' read -r name size model tran; do
+        [[ -n "$name" ]] || continue
+        if [[ -n "$live" && "$name" == "$live" && $FORCE -ne 1 ]]; then
+            continue
+        fi
+        printf '  %d) %-12s %-10s %s %s\n' "$i" "$name" "$size" "$model" "$tran"
+        paths+=("$name")
+        i=$((i + 1))
+    done < <(list_disks_tsv)
+    printf '\n'
+    read -rp "Target disk number or path (for example 1 or /dev/sda): " choice
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#paths[@]} )); then
+        DISK="${paths[choice-1]}"
+    else
+        DISK="$choice"
+    fi
+    if (( FORMAT_SET == 0 )); then
+        read -rp "Format the disk? [y/N]: " action
+        case "${action:-n}" in
+            y|Y|yes|YES) FORMAT=1 ;;
+            *)           FORMAT=0 ;;
+        esac
+    fi
+    validate_disk
+}
+
+ask_gui_details() {
+    local form err
+    while true; do
+        if ! form=$(zenity --forms --title="Zynx Linux Installer" \
+            --text="Create the user account and set the hostname.\nThe root password is optional: leave it blank to lock root and use sudo." \
+            --add-entry="Username" \
+            --add-password="User password" \
+            --add-password="Confirm password" \
+            --add-password="Root password (optional)" \
+            --add-entry="Hostname" \
+            --separator='|'); then
+            exit 1
+        fi
+        IFS='|' read -r USERNAME USER_PASSWORD USER_PASSWORD2 ROOT_PASSWORD HOSTNAME <<< "$form"
+        USERNAME=${USERNAME:-zynx}
+        HOSTNAME=${HOSTNAME:-zynx}
+        if [[ "$USER_PASSWORD" != "$USER_PASSWORD2" ]]; then
+            gui_error "The user passwords do not match."
+            continue
+        fi
+        if err=$(validate_details); then
+            break
+        fi
+        gui_error "$err"
+    done
+}
+
+ask_cli_details() {
+    local p2 err
+    read -rp "Username [zynx]: " USERNAME
+    USERNAME=${USERNAME:-zynx}
+    while true; do
+        read -rsp "User password: " USER_PASSWORD; echo
+        read -rsp "Confirm user password: " p2; echo
+        [[ "$USER_PASSWORD" == "$p2" ]] && break
+        echo "Passwords do not match."
+    done
+    read -rsp "Root password (optional, blank = lock root): " ROOT_PASSWORD; echo
+    read -rp "Hostname [zynx]: " HOSTNAME
+    HOSTNAME=${HOSTNAME:-zynx}
+    if ! err=$(validate_details); then
+        die "$err"
+    fi
+}
+
+ask_gui_timezone_locale() {
+    local tz loc selected
+    while true; do
+        if ! tz=$(zenity --entry --title="Timezone" \
+            --text="Enter an IANA timezone (for example Europe/Moscow or UTC):" \
+            --entry-text="$TIMEZONE"); then
+            exit 1
+        fi
+        TIMEZONE=${tz:-UTC}
+        [[ -f "/usr/share/zoneinfo/$TIMEZONE" ]] && break
+        gui_error "Unknown timezone: $TIMEZONE"
+    done
+
+    local locs=(en_US.UTF-8 ru_RU.UTF-8 de_DE.UTF-8 fr_FR.UTF-8 es_ES.UTF-8 it_IT.UTF-8 pt_BR.UTF-8 pl_PL.UTF-8 uk_UA.UTF-8 tr_TR.UTF-8 zh_CN.UTF-8 ja_JP.UTF-8)
+    local rows=()
+    for loc in "${locs[@]}"; do
+        if [[ "$loc" == "$LOCALE" ]]; then rows+=("TRUE" "$loc"); else rows+=("FALSE" "$loc"); fi
+    done
+    if ! selected=$(zenity --list --radiolist --title="Locale" \
+        --text="Select the system language:" \
+        --column="Select" --column="Locale" --print-column=2 \
+        --width=420 --height=360 "${rows[@]}"); then
+        exit 1
+    fi
+    LOCALE="$selected"
+
+    while true; do
+        if ! KEYBOARD=$(zenity --entry --title="Keyboard layout" \
+            --text="X11 keyboard layout(s), for example us,ru or de:" \
+            --entry-text="$KEYBOARD"); then
+            exit 1
+        fi
+        KEYBOARD=${KEYBOARD:-us}
+        [[ "$KEYBOARD" =~ ^[a-zA-Z0-9,+-]+$ ]] && break
+        gui_error "Invalid keyboard layout."
+    done
+}
+
+ask_cli_timezone_locale() {
+    read -rp "Timezone [UTC]: " TIMEZONE
+    TIMEZONE=${TIMEZONE:-UTC}
+    [[ -f "/usr/share/zoneinfo/$TIMEZONE" ]] || die "Unknown timezone: $TIMEZONE"
+    read -rp "Locale [en_US.UTF-8]: " LOCALE
+    LOCALE=${LOCALE:-en_US.UTF-8}
+    [[ "$LOCALE" =~ ^[a-z]{2}_[A-Z]{2}\.UTF-8$ ]] || die "Invalid locale: $LOCALE"
+    read -rp "Keyboard layout(s) [us,ru]: " KEYBOARD
+    KEYBOARD=${KEYBOARD:-us,ru}
+    [[ "$KEYBOARD" =~ ^[a-zA-Z0-9,+-]+$ ]] || die "Invalid keyboard layout: $KEYBOARD"
+}
+
+confirm_erase() {
+    local text answer word
+    local mode_text
+    if (( FORMAT == 1 )); then
+        mode_text="Format disk (ALL DATA ON $DISK WILL BE ERASED)"
+        word="ERASE"
+    else
+        mode_text="No formatting (install onto the existing Linux partition)"
+        word="INSTALL"
+    fi
+    printf -v text 'Target disk: %s\nMode: %s\nEdition: %s\nLogin shell: %s\nRoot size: %s GiB\nSwap file: %s GiB\nUser: %s\nHostname: %s\nTimezone: %s\nLocale: %s\nKeyboard: %s\nDefault boot entry: %s\nRoot password: %s' \
+        "$DISK" "$mode_text" "$EDITION" "$SHELL_BIN" "$ROOT_GIB" "$SWAP_GIB" "$USERNAME" "$HOSTNAME" \
+        "$TIMEZONE" "$LOCALE" "$KEYBOARD" \
+        "$([ "$DEFAULT_BOOT" -eq 1 ] && echo Zynx || echo unchanged)" \
+        "${ROOT_PASSWORD:+set}${ROOT_PASSWORD:-locked}"
+
+    if [[ "$MODE" == gui ]]; then
+        zenity --question --title="Confirm installation" --text="$text" \
+            --ok-label="Continue" --cancel-label="Cancel" || exit 1
+        if ! answer=$(zenity --entry --title="Confirm installation" \
+            --text="Type $word to continue:"); then
+            exit 1
+        fi
+        [[ "$answer" == "$word" ]] || { gui_error "Installation cancelled."; exit 1; }
+    else
+        printf '\n%s\n\n' "$text"
+        if ((ASSUME_YES == 0)); then
+            read -rp "Type $word to continue: " answer
+            [[ "$answer" == "$word" ]] || die "Installation cancelled."
+        fi
+    fi
+}
+
+cleanup() {
+    local rc=$?
+    if ((KEEP_MOUNT == 1)); then
+        return "$rc"
+    fi
+    if mountpoint -q "$MOUNT" 2>/dev/null; then
+        umount -R "$MOUNT" 2>/dev/null || true
+    fi
+    return "$rc"
+}
+
+# /dev/sda -> /dev/sda3, /dev/nvme0n1 -> /dev/nvme0n1p3
+part_dev() {
+    local disk=$1 n=$2
+    if [[ "$disk" == *[0-9] ]]; then
+        printf '%sp%s\n' "$disk" "$n"
+    else
+        printf '%s%s\n' "$disk" "$n"
+    fi
+}
+
+# Kernel device nodes can lag behind the partition table; retry instead of
+# failing the install on a slow USB disk or a busy udev daemon.
+wait_partition() {
+    local dev=$1 i
+    for (( i = 0; i < 40; i++ )); do
+        [[ -b "$dev" ]] && return 0
+        udevadm settle --timeout=5 >/dev/null 2>&1 || true
+        sleep 0.25
+    done
+    return 1
+}
+
+partition_disk() {
+    local esp root home
+    esp=$(part_dev "$DISK" 2)
+    root=$(part_dev "$DISK" 3)
+    home=$(part_dev "$DISK" 4)
+    ESP_PART="$esp"
+    ROOT_PART="$root"
+    HOME_PART="$home"
+
+    log "Stopping any swap on $DISK"
+    while read -r part fstype; do
+        [[ "$fstype" == "swap" ]] && swapoff "$part" 2>/dev/null || true
+    done < <(lsblk -nlo PATH,FSTYPE "$DISK" 2>/dev/null || true)
+
+    log "Wiping and partitioning $DISK (root ${ROOT_GIB} GiB, /home gets the rest)"
+    umount -R "$MOUNT" 2>/dev/null || true
+    wipefs -a "$DISK" >/dev/null 2>&1 || true
+    sgdisk --zap-all "$DISK"
+    sgdisk --new=1:0:+1M --typecode=1:ef02 --change-name=1:"BIOS boot" "$DISK"
+    sgdisk --new=2:0:+512M --typecode=2:ef00 --change-name=2:"EFI System" "$DISK"
+    sgdisk --new=3:0:+"${ROOT_GIB}G" --typecode=3:8300 --change-name=3:"Zynx root" "$DISK"
+    sgdisk --new=4:0:0 --typecode=4:8300 --change-name=4:"Zynx home" "$DISK"
+    partprobe "$DISK" 2>/dev/null || true
+    udevadm settle >/dev/null 2>&1 || true
+    udevadm trigger --subsystem-match=block >/dev/null 2>&1 || true
+
+    wait_partition "$esp" || die "Partition device did not appear: $esp"
+    wait_partition "$root" || die "Partition device did not appear: $root"
+    wait_partition "$home" || die "Partition device did not appear: $home"
+
+    log "Formatting $esp (FAT32), $root and $home (ext4, 1% reserved)"
+    mkfs.fat -F32 -n ZYNX_ESP "$esp"
+    mkfs.ext4 -F -m 1 -L ZYNX_ROOT "$root"
+    mkfs.ext4 -F -m 1 -L ZYNX_HOME "$home"
+
+    log "Mounting target"
+    mount "$root" "$MOUNT"
+    install -d -m 0755 "$MOUNT/home" "$MOUNT/boot/efi"
+    mount "$home" "$MOUNT/home"
+    mount "$esp" "$MOUNT/boot/efi"
+}
+
+prepare_existing() {
+    local fstype
+    ROOT_PART=$(find_root_partition "$DISK")
+    [[ -n "$ROOT_PART" ]] || die "No existing Linux root filesystem found on $DISK."
+    fstype=$(lsblk -ndo FSTYPE "$ROOT_PART" 2>/dev/null || true)
+    [[ -n "$fstype" ]] || die "Cannot detect the filesystem on $ROOT_PART."
+
+    umount -R "$MOUNT" 2>/dev/null || true
+    mount "$ROOT_PART" "$MOUNT"
+    log "Reusing root $ROOT_PART ($fstype)"
+
+    # Honour an existing separate /boot and ESP from the target's fstab so a
+    # non-Zynx layout keeps working.  The old fstab is still present here
+    # because rsync excludes /etc/fstab and genfstab runs later.
+    if fstab_mount /boot; then
+        log "Mounted existing /boot from the target fstab"
+    fi
+    if fstab_mount /home; then
+        HOME_PART=$(findmnt -n -o SOURCE --target "$MOUNT/home" 2>/dev/null || true)
+        log "Mounted existing /home $HOME_PART from the target fstab"
+    else
+        HOME_PART=""
+        log "No separate /home partition; /home stays inside the root filesystem"
+    fi
+    if fstab_mount /boot/efi; then
+        ESP_PART=$(findmnt -n -o SOURCE --target "$MOUNT/boot/efi" 2>/dev/null || true)
+        log "Mounted existing ESP $ESP_PART from the target fstab"
+    else
+        ESP_PART=$(find_esp_partition "$DISK")
+        if [[ -n "$ESP_PART" ]]; then
+            install -d -m 0755 "$MOUNT/boot/efi"
+            mount "$ESP_PART" "$MOUNT/boot/efi"
+            log "Mounted existing ESP $ESP_PART"
+        else
+            ESP_PART=""
+            log "No EFI system partition found; UEFI boot will be skipped"
+        fi
+    fi
+}
+
+# Mount a filesystem listed in the target's existing /etc/fstab.
+fstab_mount() {
+    local mp=$1 spec dev
+    [[ -f "$MOUNT/etc/fstab" ]] || return 1
+    spec=$(awk -v m="$mp" '$2 == m { print $1; exit }' "$MOUNT/etc/fstab" 2>/dev/null || true)
+    [[ -n "$spec" ]] || return 1
+    case "$spec" in
+        UUID=*)     dev=$(blkid -U "${spec#UUID=}" 2>/dev/null || true) ;;
+        PARTUUID=*) dev=$(blkid -t "PARTUUID=${spec#PARTUUID=}" -o device 2>/dev/null | head -n1 || true) ;;
+        /dev/*)     dev=$spec ;;
+        *)          return 1 ;;
+    esac
+    [[ -n "$dev" && -b "$dev" ]] || return 1
+    install -d -m 0755 "$MOUNT$mp"
+    mount "$dev" "$MOUNT$mp"
+}
+
+copy_system() {
+    local -a delete_flag=()
+    # Without formatting, remove files that no longer exist in the live
+    # system so the target is not a half-old, half-new mixture.  Excluded
+    # paths (notably /home/*) are never deleted by rsync.
+    if (( FORMAT == 0 )); then
+        delete_flag=(--delete)
+    fi
+
+    log "Copying the live system to $MOUNT (this takes a few minutes)"
+    rsync -aAXH --numeric-ids --one-file-system --info=progress2 "${delete_flag[@]}" \
+        --exclude=/dev/* \
+        --exclude=/proc/* \
+        --exclude=/sys/* \
+        --exclude=/tmp/* \
+        --exclude=/run/* \
+        --exclude=/mnt/* \
+        --exclude=/media/* \
+        --exclude=/lost+found \
+        --exclude=/boot/* \
+        --exclude=/var/cache/pacman/pkg/* \
+        --exclude=/var/lib/pacman/sync/* \
+        --exclude=/var/log/* \
+        --exclude=/var/tmp/* \
+        --exclude=/home/* \
+        --exclude=/swapfile \
+        --exclude=/root/.cache/* \
+        --exclude=/root/.bash_history \
+        --exclude=/etc/fstab \
+        --exclude=/etc/machine-id \
+        --exclude=/etc/adjtime \
+        --exclude=/etc/pacman.d/gnupg/* \
+        --exclude=/etc/ssh/ssh_host_* \
+        / "$MOUNT/"
+    sync
+}
+
+copy_kernel_and_ucode() {
+    local f src found
+    log "Copying the kernel and microcode from the live medium"
+    for f in vmlinuz-linux amd-ucode.img intel-ucode.img; do
+        found=""
+        for src in \
+            "/run/archiso/bootmnt/arch/boot/x86_64/$f" \
+            "/run/archiso/bootmnt/arch/boot/$f" \
+            "/boot/$f"; do
+            if [[ -f "$src" ]]; then
+                found="$src"
+                break
+            fi
+        done
+        if [[ -n "$found" ]]; then
+            install -m 0644 "$found" "$MOUNT/boot/$f"
+            log "  $f <- $found"
+        elif [[ "$f" == vmlinuz-linux ]]; then
+            die "Could not find $f on the live medium."
+        fi
+    done
+}
+
+write_target_config() {
+    log "Writing target configuration"
+    {
+        printf 'TARGET_DISK=%q\n' "$DISK"
+        printf 'USERNAME=%q\n' "$USERNAME"
+        printf 'USER_PASSWORD=%q\n' "$USER_PASSWORD"
+        printf 'ROOT_PASSWORD=%q\n' "$ROOT_PASSWORD"
+        printf 'HOSTNAME=%q\n' "$HOSTNAME"
+        printf 'TIMEZONE=%q\n' "$TIMEZONE"
+        printf 'LOCALE=%q\n' "$LOCALE"
+        printf 'KEYBOARD=%q\n' "$KEYBOARD"
+        printf 'FORMAT=%q\n' "$FORMAT"
+        printf 'ESP_PART=%q\n' "$ESP_PART"
+        printf 'HOME_PART=%q\n' "$HOME_PART"
+        printf 'EDITION=%q\n' "$EDITION"
+        printf 'SHELL_BIN=%q\n' "$SHELL_BIN"
+        printf 'ROOT_GIB=%q\n' "$ROOT_GIB"
+        printf 'SWAP_GIB=%q\n' "$SWAP_GIB"
+        printf 'DEFAULT_BOOT=%q\n' "$DEFAULT_BOOT"
+    } > "$MOUNT/root/zynx-install.env"
+    chmod 0600 "$MOUNT/root/zynx-install.env"
+
+    [[ -f "$POSTINSTALL" ]] || die "Missing $POSTINSTALL"
+    install -m 0755 "$POSTINSTALL" "$MOUNT/root/zynx-postinstall.sh"
+
+    log "Generating /etc/fstab"
+    genfstab -U "$MOUNT" > "$MOUNT/etc/fstab"
+
+    if [[ -e /etc/resolv.conf ]]; then
+        cp -L /etc/resolv.conf "$MOUNT/etc/resolv.conf" 2>/dev/null || true
+    fi
+}
+
+run_target_setup() {
+    log "Configuring the installed system in a chroot"
+    arch-chroot "$MOUNT" /bin/bash /root/zynx-postinstall.sh
+    install -Dm644 "$LOG" "$MOUNT/var/log/zynx-install.log" 2>/dev/null || true
+    sync
+}
+
+trim_target() {
+    log "Trimming unused blocks on the target filesystems"
+    fstrim -v "$MOUNT" 2>/dev/null || \
+        log "fstrim is not supported here; skipping"
+    if mountpoint -q "$MOUNT/home"; then
+        fstrim -v "$MOUNT/home" 2>/dev/null || true
+    fi
+}
+
+run_install() {
+    trap cleanup EXIT
+    progress 3 "Checking installation settings"
+    log "Installation started: $DISK (format=$FORMAT edition=$EDITION shell=$SHELL_BIN)"
+    validate_disk
+    if (( FORMAT == 1 )); then
+        progress 8 "Partitioning and formatting $DISK"
+        partition_disk
+        progress 16 "Copying the system"
+    else
+        progress 8 "Preparing the existing partitions"
+        prepare_existing
+        progress 16 "Copying the system"
+    fi
+    copy_system
+    progress 70 "Copying the kernel and microcode"
+    copy_kernel_and_ucode
+    progress 76 "Writing the system configuration"
+    write_target_config
+    progress 82 "Configuring the installed system"
+    run_target_setup
+    progress 96 "Optimizing the installed filesystems"
+    trim_target
+    progress 100 "Installation complete"
+    log "Installation completed successfully"
+    if ((KEEP_MOUNT == 1)); then
+        log "Keeping $MOUNT mounted (--keep-mounted)"
+        trap - EXIT
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Interactive selection
+# ---------------------------------------------------------------------------
+if [[ "$MODE" != auto ]]; then
+    if [[ "$MODE" == gui ]]; then
+        if [[ -z "${DISPLAY:-}" ]]; then
+            die "No graphical display found. Use --cli or --auto."
+        fi
+        [[ -z "$DISK" ]] && ask_gui_disk
+        validate_disk
+        [[ -z "$USERNAME" ]] && ask_gui_details
+        ask_gui_timezone_locale
+    else
+        printf '\nZynx Linux installer (text mode)\n\n'
+        [[ -z "$DISK" ]] && ask_cli_disk
+        validate_disk
+        [[ -z "$USERNAME" ]] && ask_cli_details
+        ask_cli_timezone_locale
+    fi
+else
+    [[ -n "$DISK" ]] || die "--auto requires --disk"
+    [[ -n "$USERNAME" ]] || die "--auto requires --user"
+    [[ -n "$USER_PASSWORD" ]] || die "--auto requires --user-password"
+    validate_details >/dev/null || die "Invalid user details"
+    validate_disk
+fi
+
+confirm_erase
+
+if [[ "$MODE" == gui ]]; then
+    log "Starting graphical install"
+    ( run_install ) &
+    pid=$!
+    (
+        while kill -0 "$pid" 2>/dev/null; do
+            msg=$(tail -n 1 "$LOG" 2>/dev/null | tr -d '\r' | cut -c1-180 || true)
+            printf '# %s\n' "${msg:-Installing...}"
+            sleep 1
+        done
+    ) | zenity --progress --title="Installing Zynx Linux" \
+        --text="Copying the system and configuring the boot loader..." \
+        --pulsate --auto-close --no-cancel --width=650 || true
+
+    if wait "$pid"; then
+        gui_info "Zynx Linux has been installed on $DISK.
+User: $USERNAME
+Root password: ${ROOT_PASSWORD:+set}${ROOT_PASSWORD:-locked}
+
+Remove the live medium and reboot."
+    else
+        printf '3\nInstallation failed\n' >"$STATUS" 2>/dev/null || true
+        zenity --text-info --title="Installation failed" \
+            --filename="$LOG" --width=900 --height=600 || true
+        exit 1
+    fi
+else
+    run_install
+    printf '\nZynx Linux has been installed on %s.\nUser: %s\nRoot password: %s\nRemove the live medium and reboot.\n\n' \
+        "$DISK" "$USERNAME" "${ROOT_PASSWORD:+set}${ROOT_PASSWORD:-locked}"
+fi

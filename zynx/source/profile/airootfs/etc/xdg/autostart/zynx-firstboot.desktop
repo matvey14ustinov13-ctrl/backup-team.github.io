@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Zynx First Boot
+Comment=Optional root password setup after installation
+Exec=/usr/local/bin/zynx-firstboot
+Icon=dialog-password
+Terminal=false
+OnlyShowIn=XFCE;
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

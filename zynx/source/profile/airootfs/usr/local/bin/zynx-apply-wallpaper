@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -u
+# Apply the Zynx wallpaper to every monitor that xfdesktop discovers.
+#
+# xfce4-desktop stores its backdrop per monitor under a key named after the
+# RandR output (for example /backdrop/screen0/monitorVirtual-1/workspace0/
+# last-image), so a static xfconf file cannot cover every machine.  This
+# helper runs once per user (a marker file records it) and rewrites every
+# existing backdrop key, leaving later user choices alone.
+
+WP=/usr/share/backgrounds/zynx/zynx-wallpaper.png
+[ -f "$WP" ] || exit 0
+
+conf_dir="${XDG_CONFIG_HOME:-$HOME/.config}/zynx"
+marker="$conf_dir/wallpaper-applied"
+[ -e "$marker" ] && exit 0
+
+command -v xfconf-query >/dev/null 2>&1 || exit 0
+
+props=""
+i=0
+while [ "$i" -lt 20 ]; do
+    props=$(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep '/last-image$' || true)
+    [ -n "$props" ] && break
+    sleep 0.5
+    i=$((i + 1))
+done
+[ -n "$props" ] || exit 0
+
+for prop in $props; do
+    xfconf-query -c xfce4-desktop -p "$prop" -s "$WP" >/dev/null 2>&1 || true
+    style="${prop%/last-image}/image-style"
+    xfconf-query -c xfce4-desktop -p "$style" -s 5 >/dev/null 2>&1 || true
+done
+
+mkdir -p "$conf_dir"
+: > "$marker"
+exit 0

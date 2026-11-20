@@ -1,0 +1,2 @@
+Defaults:zynx env_keep += "DISPLAY XAUTHORITY"
+zynx ALL=(ALL:ALL) NOPASSWD: ALL

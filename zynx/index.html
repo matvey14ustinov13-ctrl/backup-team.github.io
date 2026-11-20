@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zynx Linux — Backup Team</title>
+    <style>
+        body {
+            background: #ffffff;
+            color: #111111;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            line-height: 1.6;
+        }
+        header {
+            background: #f8f9fa;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 40px 20px;
+            text-align: center;
+        }
+        header h1 { margin: 0 0 8px; font-size: 2.4rem; }
+        header p { margin: 0; color: #555555; }
+        main { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
+        h2 { border-bottom: 2px solid #111111; padding-bottom: 8px; margin-top: 40px; }
+        h3 { margin-bottom: 6px; }
+        .badge {
+            display: inline-block;
+            background: #ff8c00;
+            color: #111111;
+            font-weight: 700;
+            border-radius: 999px;
+            padding: 3px 12px;
+            font-size: 0.85rem;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+        .download {
+            display: inline-block;
+            background: #ff8c00;
+            color: #111111;
+            text-decoration: none;
+            font-weight: 700;
+            padding: 14px 26px;
+            border-radius: 8px;
+            margin: 12px 10px 12px 0;
+        }
+        .download:hover { background: #ffa233; }
+        .secondary {
+            display: inline-block;
+            border: 1px solid #d1d5db;
+            color: #111111;
+            text-decoration: none;
+            font-weight: 600;
+            padding: 13px 24px;
+            border-radius: 8px;
+        }
+        code, pre {
+            background: #f3f4f6;
+            border-radius: 6px;
+            font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+            font-size: 0.92rem;
+        }
+        code { padding: 2px 6px; }
+        pre { padding: 14px; overflow-x: auto; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #e5e7eb; padding: 10px 12px; text-align: left; }
+        th { background: #f8f9fa; }
+        .note {
+            border-left: 4px solid #ff8c00;
+            background: #fff7ed;
+            padding: 12px 16px;
+            border-radius: 4px;
+        }
+        footer {
+            border-top: 1px solid #e5e7eb;
+            margin-top: 50px;
+            padding: 24px 20px;
+            text-align: center;
+            color: #666666;
+            font-size: 0.9rem;
+        }
+        footer a { color: #0066cc; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Zynx Linux <span class="badge">v1.0</span></h1>
+        <p>A clean, offline Arch Linux installer with XFCE, built by Backup Team.</p>
+    </header>
+
+    <main>
+        <p>
+            Zynx Linux is an Arch-based live medium with a graphical installer written in
+            C + GTK3 (no Python, no terminal needed). The installer copies the live system
+            to the target disk, configures the boot loader and creates your user account.
+            The interface and the installed system are in English.
+        </p>
+
+        <a class="download" href="https://github.com/matvey14ustinov13-ctrl/backup-team.github.io/releases/latest">
+            Download the latest release
+        </a>
+        <a class="secondary" href="https://github.com/matvey14ustinov13-ctrl/backup-team.github.io/releases/latest">
+            Release notes and SHA256
+        </a>
+
+        <h2>What you get</h2>
+        <ul>
+            <li><strong>XFCE Full</strong> — Firefox, LibreOffice, GIMP, VLC, printing and media support.</li>
+            <li><strong>XFCE Minimal</strong> — XFCE with essential applications only.</li>
+            <li><strong>Console</strong> — no graphical desktop; text login, networking and package tools.</li>
+            <li>Login shell for the new user: <strong>bash</strong>, <strong>zsh</strong> or <strong>fish</strong>.</li>
+            <li>A separate <strong>/home</strong> partition and an optional <strong>swap file</strong> (0, 2, 4 or 8 GiB).</li>
+            <li>Formatting is <strong>off by default</strong>; the installer shows the layout it will use.</li>
+            <li>Optional “Make Zynx the default boot entry” switch.</li>
+            <li>Magic SysRq enabled on the live medium and the installed system:
+                <code>Alt + SysRq</code>, then <code>R E I S U B</code>.</li>
+        </ul>
+
+        <h2>Requirements</h2>
+        <ul>
+            <li>A 64-bit x86 computer, at least 12 GiB of disk space (16 GiB recommended).</li>
+            <li>At least 2 GiB of RAM.</li>
+            <li>A USB drive of 2 GB or more, or a virtual machine.</li>
+        </ul>
+
+        <h2>Write the image to a USB drive</h2>
+        <p>Download the ZIP, extract the ISO and verify it:</p>
+<pre>sha256sum zynx-YYYY.MM.DD-x86_64.iso</pre>
+        <p>On Linux or macOS:</p>
+<pre>sudo dd if=zynx-YYYY.MM.DD-x86_64.iso of=/dev/sdX bs=8M status=progress oflag=sync</pre>
+        <p>On Windows use <a href="https://rufus.ie/">Rufus</a> in DD mode or
+           <a href="https://www.balena.io/etcher/">balenaEtcher</a>.</p>
+
+        <h2>Install</h2>
+        <ol>
+            <li>Boot the medium (UEFI or BIOS) and choose <em>Zynx Linux</em>.</li>
+            <li>The live desktop logs in automatically as <code>zynx</code>.</li>
+            <li>Start <em>Install Zynx Linux</em> from the desktop.</li>
+            <li>Choose edition, shell and disk, then create the user account.</li>
+            <li>Set the root partition size and the swap file size; select whether Zynx
+                should become the default boot entry.</li>
+            <li>Review the summary, type the confirmation word and wait for the copy to finish.</li>
+            <li>Remove the medium and reboot.</li>
+        </ol>
+
+        <div class="note">
+            <strong>Formatting is disabled by default.</strong> With formatting disabled the
+            installer reuses the largest existing Linux root partition and keeps your
+            <code>/home</code>. Enable the “Format the disk” switch only if you want a fresh
+            partition table (BIOS boot, ESP, root, /home).
+        </div>
+
+        <h2>After installation</h2>
+        <p>
+            Log in with the account you created. Administrative tasks use <code>sudo</code>;
+            the root account stays locked unless you set a root password during installation.
+            The system is offline-installed: update it with <code>sudo pacman -Syu</code>.
+        </p>
+
+        <h2>Источник и сборка</h2>
+        <p>
+            Исходники проекта (профиль archiso, установщик на C, скрипты сборки) находятся в
+            <a href="https://github.com/matvey14ustinov13-ctrl/backup-team.github.io/tree/main/zynx/source">zynx/source</a>.
+            ISO собирается на Arch Linux командой <code>sudo bash build-arch-amdgpu-shell.sh</code>.
+        </p>
+
+        <h2>License</h2>
+        <p>GPL v3. The Linux kernel and the Arch Linux packages keep their own licenses.</p>
+    </main>
+
+    <footer>
+        <p><a href="../">Backup Team</a> · <a href="https://github.com/matvey14ustinov13-ctrl">GitHub</a> · GPL v3</p>
+    </footer>
+</body>
+</html>

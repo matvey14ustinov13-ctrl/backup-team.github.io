@@ -1,0 +1,18 @@
+[Unit]
+Description=Light Display Manager
+Documentation=man:lightdm(1)
+# Zynx override of /usr/lib/systemd/system/lightdm.service.
+# The packaged unit carries Conflicts=getty@tty1.service, which stops either
+# LightDM or the live tty1 root shell as soon as the other starts.  The live
+# medium keeps LightDM on tty7 and a root bash on tty1 at the same time, so
+# the conflict is removed here.
+After=getty@tty1.service systemd-user-sessions.service plymouth-quit.service acpid.service
+
+[Service]
+ExecStart=/usr/bin/lightdm
+Restart=always
+IgnoreSIGPIPE=no
+BusName=org.freedesktop.DisplayManager
+
+[Install]
+Alias=display-manager.service

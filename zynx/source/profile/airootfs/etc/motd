@@ -1,0 +1,10 @@
+Welcome to Zynx Linux.
+
+  WARNING: the live tty1 root shell has no password. Use this medium only
+  on trusted hardware; the installer creates a normal user on the target.
+
+  sudo pacman -Syu          update the system
+  sudo pacman -S <package>  install a package
+  zynx-update               graphical update helper
+
+Documentation: https://wiki.archlinux.org/

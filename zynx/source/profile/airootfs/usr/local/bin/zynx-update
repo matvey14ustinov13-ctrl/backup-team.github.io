@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Zynx Linux graphical update helper.
+# Firefox is a normal pacman package on Zynx, so a full system update also
+# updates Firefox.  This helper only shows the update list and starts pacman
+# in a terminal so the user can see exactly what happens.
+set -Eeuo pipefail
+export LC_ALL=C
+
+if ! command -v zenity >/dev/null 2>&1; then
+    exec sudo pacman -Syu
+fi
+if [[ -z "${DISPLAY:-}" ]]; then
+    exec sudo pacman -Syu
+fi
+
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+if ! checkupdates >"$tmp" 2>/dev/null || [[ ! -s "$tmp" ]]; then
+    zenity --info --title="Zynx Linux updates" --width=520 \
+        --text="The system is up to date." || true
+    exit 0
+fi
+
+zenity --text-info --title="Available updates" --filename="$tmp" \
+    --width=820 --height=520 --ok-label="Continue" --cancel-label="Cancel" \
+    >/dev/null 2>&1 || exit 0
+
+if zenity --question --title="Install updates" --width=560 \
+    --text="Install all available updates now?\n\nThis runs 'sudo pacman -Syu' in a terminal. Firefox is updated by the same command." \
+    --ok-label="Update" --cancel-label="Cancel"; then
+    exec xfce4-terminal --title="Zynx Linux update" --command="sudo pacman -Syu"
+fi

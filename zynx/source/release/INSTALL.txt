@@ -1,0 +1,106 @@
+ZYNX LINUX 1.0 - INSTALLATION GUIDE
+===================================
+
+ARCHIVE CONTENTS
+  zynx-YYYY.MM.DD-x86_64.iso          live / installation image
+  zynx-YYYY.MM.DD-x86_64.iso.sha256   SHA256 checksum
+  README.md                           full bilingual guide
+  INSTALL.txt                         this file
+
+SPLIT ARCHIVE
+  The download is split into volumes: zynx-1.0-release.z01 (first) and
+  zynx-1.0-release.zip (last). Download all volumes into one folder.
+  Windows: 7-Zip or WinRAR -> open the .zip and extract (reads .z01 too).
+  Linux/macOS:
+      zip -s 0 zynx-1.0-release.zip --out zynx-1.0-full.zip
+      unzip zynx-1.0-full.zip
+
+ENGLISH
+-------
+1. CHECK THE IMAGE
+   Linux/macOS:  sha256sum -c zynx-YYYY.MM.DD-x86_64.iso.sha256
+   Windows:      Get-FileHash .\zynx-YYYY.MM.DD-x86_64.iso -Algorithm SHA256
+
+2. WRITE TO USB (the USB drive will be erased)
+   Linux/macOS:  sudo dd if=zynx-YYYY.MM.DD-x86_64.iso of=/dev/sdX \
+                      bs=8M status=progress oflag=sync
+   Windows:      Rufus in DD mode, or balenaEtcher
+
+3. BOOT
+   Open the firmware boot menu (F12/F11/Esc), select the USB drive and
+   choose "Zynx Linux". The live desktop logs in as user "zynx".
+
+4. INSTALL
+   Start "Install Zynx Linux" on the desktop.
+   - Edition: XFCE Full, XFCE Minimal or Console; shell bash/zsh/fish.
+   - Disk: "Format the disk" is OFF by default.
+       OFF = keep the layout, reuse the existing Linux root, keep /home.
+       ON  = new GPT: BIOS boot 1 MiB, ESP 512 MiB, root, /home.
+   - User: name, password, optional root password, computer name.
+   - Settings: time zone, language (English), keyboard, root size,
+     swap file 0/2/4/8 GiB, "Make Zynx the default boot entry".
+   - Review: check the summary and partition plan, type the confirmation
+     word, install.
+
+   Minimum disk: 12 GiB.
+
+5. AFTER INSTALLATION
+   Remove the USB drive and reboot. Log in with your account.
+   Administrative commands use sudo. Update with: sudo pacman -Syu
+
+EMERGENCY REBOOT
+   If the system freezes, hold Alt and press SysRq, then R E I S U B
+   one key at a time. SysRq is enabled on the live medium and in the
+   installed system.
+
+NOTES
+   - The installer and the installed system use English by default
+     (en_US.UTF-8).
+   - Installation is offline; no network is required.
+   - Secure Boot must be disabled.
+   - Source: https://github.com/matvey14ustinov13-ctrl/backup-team.github.io
+
+
+РУССКИЙ
+-------
+1. ПРОВЕРКА ОБРАЗА
+   Linux/macOS:  sha256sum -c zynx-YYYY.MM.DD-x86_64.iso.sha256
+   Windows:      Get-FileHash .\zynx-YYYY.MM.DD-x86_64.iso -Algorithm SHA256
+
+2. ЗАПИСЬ НА USB (все данные на флешке будут стёрты)
+   Linux/macOS:  sudo dd if=zynx-YYYY.MM.DD-x86_64.iso of=/dev/sdX \
+                      bs=8M status=progress oflag=sync
+   Windows:      Rufus в режиме DD или balenaEtcher
+
+3. ЗАГРУЗКА
+   Откройте меню загрузки (F12/F11/Esc), выберите USB и пункт
+   "Zynx Linux". Живой рабочий стол входит под пользователем "zynx".
+
+4. УСТАНОВКА
+   Запустите "Install Zynx Linux" на рабочем столе.
+   - Edition: XFCE Full, XFCE Minimal или Console; оболочка bash/zsh/fish.
+   - Disk: "Format the disk" по умолчанию ВЫКЛЮЧЕН.
+       ВЫКЛ = сохранить разметку, использовать существующий Linux-root,
+              сохранить /home.
+       ВКЛ  = новая GPT: BIOS boot 1 МиБ, ESP 512 МиБ, root, /home.
+   - User: имя, пароль, необязательный пароль root, имя компьютера.
+   - Settings: часовой пояс, язык (английский), клавиатура, размер root,
+     swap-файл 0/2/4/8 ГиБ, "Сделать Zynx системой по умолчанию".
+   - Review: проверьте сводку и план разметки, введите слово
+     подтверждения, установите.
+
+   Минимальный диск: 12 ГиБ.
+
+5. ПОСЛЕ УСТАНОВКИ
+   Извлеките USB и перезагрузитесь. Войдите под своим пользователем.
+   Административные команды — через sudo. Обновление: sudo pacman -Syu
+
+АВАРИЙНАЯ ПЕРЕЗАГРУЗКА
+   При зависании зажмите Alt и нажмите SysRq, затем по одной клавише
+   R E I S U B. SysRq включён на живом носителе и в системе.
+
+ПРИМЕЧАНИЯ
+   - Установщик и система по умолчанию на английском (en_US.UTF-8).
+   - Установка офлайн, сеть не требуется.
+   - Secure Boot должен быть отключён.
+   - Исходники: https://github.com/matvey14ustinov13-ctrl/backup-team.github.io

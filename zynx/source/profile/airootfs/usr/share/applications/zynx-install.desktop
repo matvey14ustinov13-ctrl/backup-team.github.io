@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Zynx Linux Installer
+Comment=Install Zynx Linux to a disk or USB drive
+Exec=/usr/local/bin/zynx-gui
+Icon=drive-harddisk
+Terminal=false
+StartupNotify=true
+Categories=System;
+NoDisplay=true

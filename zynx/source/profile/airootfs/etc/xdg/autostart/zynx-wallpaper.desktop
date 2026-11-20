@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Zynx Wallpaper
+Comment=Set the Zynx desktop background on first login
+Exec=/usr/local/bin/zynx-apply-wallpaper
+Icon=preferences-desktop-wallpaper
+Terminal=false
+OnlyShowIn=XFCE;
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

@@ -1,0 +1,15 @@
+# vim:set ft=sh:
+#
+# Installed-system initramfs configuration.  The Zynx installer copies this
+# file over /etc/mkinitcpio.conf on the target and runs `mkinitcpio -P`.
+# The Arch linux preset creates a normal and a portable fallback image.
+
+MODULES=(amdgpu)
+
+BINARIES=()
+FILES=()
+
+HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block filesystems fsck)
+
+COMPRESSION="zstd"
+COMPRESSION_OPTIONS=(-T0 -19)

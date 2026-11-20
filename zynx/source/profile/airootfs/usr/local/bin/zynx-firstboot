@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# ============================================================================
+# zynx-firstboot - optional first-login helper for installed systems.
+#
+# The installer creates /var/lib/zynx/firstboot only when the root password
+# was left blank.  This helper offers to set one, but it is completely
+# optional: the user can skip it and use sudo.
+# ============================================================================
+set -Eeuo pipefail
+export LC_ALL=C
+
+MARKER=/var/lib/zynx/firstboot
+[[ -f "$MARKER" ]] || exit 0
+command -v zenity >/dev/null 2>&1 || exit 0
+[[ -n "${DISPLAY:-}" ]] || exit 0
+
+zenity --info --title="Welcome to Zynx Linux" --width=620 \
+    --text="Welcome to Zynx Linux!\n\nYour user account is ready. The root account was left locked, which is normal on a desktop system: use sudo for administrative tasks.\n\nYou can set a root password now, or skip this and set one later with:\n\n    sudo passwd root" \
+    >/dev/null 2>&1 || true
+
+if zenity --question --title="Root password" --width=620 \
+    --text="Do you want to set a root password now?\n\nThis is optional." \
+    --ok-label="Set password" --cancel-label="Skip"; then
+    pass=$(zenity --password --title="Root password" --text="New root password:") || exit 0
+    pass2=$(zenity --password --title="Root password" --text="Confirm root password:") || exit 0
+    if [[ "$pass" != "$pass2" ]]; then
+        zenity --error --title="Root password" --text="The passwords do not match." || true
+        exit 0
+    fi
+    if (( ${#pass} < 4 )); then
+        zenity --error --title="Root password" --text="The password is too short." || true
+        exit 0
+    fi
+    if printf 'root:%s\n' "$pass" | pkexec chpasswd; then
+        pkexec rm -f "$MARKER" >/dev/null 2>&1 || true
+        zenity --info --title="Root password" --text="The root password has been set." || true
+    else
+        zenity --error --title="Root password" \
+            --text="Could not set the root password. Open a terminal and run:\n\n    sudo passwd root" || true
+    fi
+else
+    pkexec rm -f "$MARKER" >/dev/null 2>&1 || true
+    zenity --info --title="Zynx Linux" \
+        --text="Skipped. You can set a root password later with:\n\n    sudo passwd root" \
+        >/dev/null 2>&1 || true
+fi

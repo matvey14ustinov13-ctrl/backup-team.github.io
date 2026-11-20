@@ -1,0 +1,19 @@
+[Unit]
+Description=Zynx live root shell on tty1
+Documentation=https://wiki.archlinux.org/title/Installation_guide
+# getty@tty1 is skipped at boot when its ConditionPathExists=/dev/tty0 is
+# evaluated before the virtual console device node exists (seen in QEMU and
+# some firmware).  Start it again once the graphical session is up; on the
+# installed system this simply brings up the normal tty1 login prompt.
+After=graphical.target lightdm.service
+Wants=lightdm.service
+ConditionPathExists=/dev/tty1
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl start --no-block getty@tty1.service
+RemainAfterExit=yes
+TimeoutStartSec=30
+
+[Install]
+WantedBy=graphical.target

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Zynx Linux Update
+Comment=Check for and install system updates with pacman
+Exec=/usr/local/bin/zynx-update
+Icon=system-software-update
+Terminal=false
+Categories=System;Settings;
+Keywords=update;upgrade;pacman;
